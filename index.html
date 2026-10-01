@@ -20,6 +20,14 @@
   .modes button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:1rem; line-height:1.15; }
   .modes button b { font-size:1.4rem; }
   input[type=number] { -moz-appearance:textfield; appearance:textfield; } input::-webkit-outer-spin-button,input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+  .opts { display:grid; gap:8px; }
+  .opts button { display:flex; align-items:center; gap:10px; text-align:left; font-size:1rem; padding:10px 12px; }
+  .opts button::before { content:"○"; font-size:1.3rem; }
+  .opts button.sel::before { content:"✔"; }
+  .opts button:disabled { opacity:.4; cursor:not-allowed; }
+  .hint { font-size:.85rem; margin:8px 2px 14px; color:#777; }
+  .q { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:10px; }
+  @media (max-width:420px) { .q { font-size:2rem !important; gap:6px; } .q input { width:3.4ch !important; } }
   .pad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
   .pad button { font-size:1.6rem; font-weight:bold; padding:10px 0; min-height:56px; }
   .pad .fn { background:#eee; border-color:#eee; }
@@ -31,7 +39,7 @@
   .top { display:flex; justify-content:space-between; font-size:1rem; margin-bottom:8px; }
   .bar { height:10px; background:var(--soft); border-radius:6px; overflow:hidden; margin-bottom:18px; }
   .bar div { height:100%; background:var(--accent); width:0; transition:width .3s; }
-  .q { text-align:center; font-size:2.6rem; font-weight:bold; margin:10px 0 18px; }
+  .q { font-size:2.6rem; font-weight:bold; margin:10px 0 18px; }
   .q input { width:5.2ch; font:inherit; text-align:center; border:3px solid var(--accent); border-radius:12px; padding:4px; }
   .msg { text-align:center; min-height:2em; font-size:1.2rem; font-weight:bold; margin-bottom:10px; }
   .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
@@ -59,14 +67,20 @@
       <button data-c="20">20</button>
       <button data-c="30">30</button>
     </div>
-    <p></p>
+    <h2 style="margin-top:20px">4. Extrák <small style="font-weight:normal">(bekapcsolható)</small></h2>
+    <div class="opts" id="opts">
+      <button data-o="cross">🔟 Tízesátlépés (pl. 8 + 5, 23 − 8)</button>
+      <button data-o="missing">❓ Hiányzó szám (pl. 7 + ? = 15)</button>
+      <button data-o="timer">⏱️ Időmérés</button>
+    </div>
+    <p class="hint" id="crosshint">A tízesátlépés a 20-as számkörtől érhető el.</p>
     <button class="go" id="start">Indulhat! 🚀</button>
   </section>
 
   <section id="game" class="card hidden">
-    <div class="top"><span id="info"></span><span id="score"></span></div>
+    <div class="top"><span id="info"></span><span id="time"></span><span id="score"></span></div>
     <div class="bar"><div id="prog"></div></div>
-    <div class="q"><span id="qtext"></span> <input id="ans" type="text" inputmode="none" readonly autocomplete="off" maxlength="3"></div>
+    <div class="q"><span id="qpre"></span><input id="ans" type="text" inputmode="none" readonly autocomplete="off" maxlength="3"><span id="qpost"></span></div>
     <div class="msg" id="msg"></div>
     <div class="pad" id="pad"></div>
     <button class="go" id="check">Ellenőrzés</button>
@@ -85,6 +99,8 @@
 <script>
 const $ = id => document.getElementById(id);
 let mode = '+', limit = 10, total = 10;
+const opts = { cross:false, missing:false, timer:false };
+let t0 = 0, timerId = null;
 let questions = [], idx = 0, correct = 0, tries = 0, locked = false;
 
 // határ gombok: 10, 20, ... 100
@@ -102,41 +118,67 @@ function pick(container, attr, cb) {
   });
 }
 pick($('modes'), 'm', v => mode = v);
-pick($('limits'), 'l', v => limit = +v);
+function syncCross() {
+  const b = document.querySelector('[data-o=cross]');
+  b.disabled = limit < 20;
+  $('crosshint').style.display = limit < 20 ? '' : 'none';
+}
+pick($('limits'), 'l', v => { limit = +v; syncCross(); });
+$('opts').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  b.classList.toggle('sel'); opts[b.dataset.o] = b.classList.contains('sel');
+});
+syncCross();
 pick($('counts'), 'c', v => total = +v);
 
 const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 
 function makeQuestion() {
   const op = mode === '*' ? (Math.random() < .5 ? '+' : '-') : mode;
+  const cross = opts.cross && limit >= 20;
+  let a, b, c, n = 0;
   if (op === '+') {
-    const a = rnd(0, limit), b = rnd(0, limit - a);
-    return { text: `${a} + ${b} =`, answer: a + b };
+    do { a = rnd(0, limit); b = rnd(0, limit - a); n++; }
+    while (cross && n < 500 && (a % 10) + (b % 10) < 10);
+    c = a + b;
+  } else {
+    do { a = rnd(0, limit); b = rnd(0, a); n++; }
+    while (cross && n < 500 && (a % 10) >= (b % 10));
+    c = a - b;
   }
-  const a = rnd(0, limit), b = rnd(0, a);
-  return { text: `${a} − ${b} =`, answer: a - b };
+  const sign = op === '+' ? '+' : '−';
+  if (!opts.missing) return { pre: `${a} ${sign} ${b} =`, post: '', answer: c };
+  if (Math.random() < .5) return { pre: `${a} ${sign}`, post: `= ${c}`, answer: b };
+  return { pre: '', post: `${sign} ${b} = ${c}`, answer: a };
 }
 function makeSet() {
   const seen = new Set(), list = [];
   let guard = 0;
   while (list.length < total && guard++ < 1000) {
     const q = makeQuestion();
-    if (seen.has(q.text) && guard < 500) continue;
-    seen.add(q.text); list.push(q);
+    const key = q.pre + '|' + q.post + '|' + q.answer;
+    if (seen.has(key) && guard < 500) continue;
+    seen.add(key); list.push(q);
   }
   return list;
 }
 
 function show(id) { ['setup', 'game', 'result'].forEach(s => $(s).classList.toggle('hidden', s !== id)); }
 
+const fmt = ms => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function tick() { $('time').textContent = '⏱️ ' + fmt(Date.now() - t0); }
 function start() {
   questions = makeSet(); idx = 0; correct = 0;
-  show('game'); next();
+  show('game');
+  $('time').style.display = opts.timer ? '' : 'none';
+  clearInterval(timerId);
+  if (opts.timer) { t0 = Date.now(); tick(); timerId = setInterval(tick, 500); }
+  next();
 }
 function next() {
   if (idx >= questions.length) return finish();
   tries = 0; locked = false;
-  $('qtext').textContent = questions[idx].text;
+  $('qpre').textContent = questions[idx].pre; $('qpost').textContent = questions[idx].post;
   $('ans').value = ''; $('msg').textContent = ''; $('msg').className = 'msg';
   $('info').textContent = `${idx + 1}. feladat / ${questions.length}`;
   $('score').textContent = `⭐ ${correct}`;
@@ -169,17 +211,19 @@ function check() {
   $('score').textContent = `⭐ ${correct}`;
 }
 function finish() {
+  clearInterval(timerId);
   show('result');
   const pct = correct / questions.length;
   $('stars').textContent = pct >= .9 ? '🏆⭐⭐⭐' : pct >= .7 ? '⭐⭐' : pct >= .4 ? '⭐' : '💪';
   $('rtext').textContent = `${correct} / ${questions.length} elsőre jó`;
   $('rsub').textContent = pct >= .9 ? 'Fantasztikus!' : pct >= .7 ? 'Nagyon ügyes!' : 'Gyakorolj még egy kicsit, menni fog!';
+  if (opts.timer) $('rsub').textContent += ` ⏱️ Időd: ${fmt(Date.now() - t0)}`;
 }
 
 $('start').onclick = start;
 $('check').onclick = check;
 $('again').onclick = start;
-$('menu').onclick = $('quit').onclick = () => show('setup');
+$('menu').onclick = $('quit').onclick = () => { clearInterval(timerId); show('setup'); };
 // saját számbillentyűzet (nem takarja el a képernyőt telefonon/tableten)
 ['1','2','3','4','5','6','7','8','9','⌫','0','C'].forEach(k => {
   const b = document.createElement('button');
