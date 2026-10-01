@@ -91,6 +91,7 @@
     <div class="big" id="stars"></div>
     <h2 id="rtext"></h2>
     <p id="rsub"></p>
+    <button class="go hidden" id="retry" style="background:var(--accent);border-color:var(--accent);margin-bottom:10px"></button>
     <button class="go" id="again">Még egyszer</button>
     <p><button class="back" id="menu">← Menü</button></p>
   </section>
@@ -100,7 +101,7 @@
 const $ = id => document.getElementById(id);
 let mode = '+', limit = 10, total = 10;
 const opts = { cross:false, missing:false, timer:false };
-let t0 = 0, timerId = null;
+let t0 = 0, timerId = null, retryRound = false;
 let questions = [], idx = 0, correct = 0, tries = 0, locked = false;
 
 // határ gombok: 10, 20, ... 100
@@ -167,8 +168,9 @@ function show(id) { ['setup', 'game', 'result'].forEach(s => $(s).classList.togg
 
 const fmt = ms => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 function tick() { $('time').textContent = '⏱️ ' + fmt(Date.now() - t0); }
-function start() {
-  questions = makeSet(); idx = 0; correct = 0;
+function start() { begin(makeSet(), false); }
+function begin(list, isRetry) {
+  questions = list; idx = 0; correct = 0; retryRound = isRetry;
   show('game');
   $('time').style.display = opts.timer ? '' : 'none';
   clearInterval(timerId);
@@ -180,7 +182,7 @@ function next() {
   tries = 0; locked = false;
   $('qpre').textContent = questions[idx].pre; $('qpost').textContent = questions[idx].post;
   $('ans').value = ''; $('msg').textContent = ''; $('msg').className = 'msg';
-  $('info').textContent = `${idx + 1}. feladat / ${questions.length}`;
+  $('info').textContent = (retryRound ? '🔁 ' : '') + `${idx + 1}. feladat / ${questions.length}`;
   $('score').textContent = `⭐ ${correct}`;
   $('prog').style.width = (idx / questions.length * 100) + '%';
   $('check').textContent = 'Ellenőrzés';
@@ -197,7 +199,7 @@ function check() {
     $('msg').className = 'msg ok';
     locked = true; $('check').textContent = 'Következő →';
   } else {
-    tries++;
+    tries++; q.missed = true;
     if (tries >= 2) {
       $('msg').textContent = `A helyes válasz: ${q.answer}`;
       $('msg').className = 'msg bad';
@@ -217,6 +219,11 @@ function finish() {
   $('stars').textContent = pct >= .9 ? '🏆⭐⭐⭐' : pct >= .7 ? '⭐⭐' : pct >= .4 ? '⭐' : '💪';
   $('rtext').textContent = `${correct} / ${questions.length} elsőre jó`;
   $('rsub').textContent = pct >= .9 ? 'Fantasztikus!' : pct >= .7 ? 'Nagyon ügyes!' : 'Gyakorolj még egy kicsit, menni fog!';
+  const missed = questions.filter(q => q.missed);
+  $('retry').classList.toggle('hidden', !missed.length);
+  $('retry').textContent = `🔁 Hibás feladatok újra (${missed.length})`;
+  $('retry').onclick = () => begin(missed.map(q => ({ pre: q.pre, post: q.post, answer: q.answer })), true);
+  if (!missed.length) $('rsub').textContent += retryRound ? ' Minden hibát kijavítottál! 🎯' : ' Hibátlan kör! 🎯';
   if (opts.timer) $('rsub').textContent += ` ⏱️ Időd: ${fmt(Date.now() - t0)}`;
 }
 
